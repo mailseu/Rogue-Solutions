@@ -1,10 +1,14 @@
 #include <Arduino.h>
-#include "blink.h"
+#define LED 2
 
 void setup() {
-    pinMode(LED_BUILTIN, OUTPUT);
+    pinMode(LED, OUTPUT);
 }
 
 void loop() {
-    blinkOnce(LED_BUILTIN);   // <-- PASS THE PIN
+    digitalWrite(LED, HIGH);
+    delay(100);
+    
+    digitalWrite(LED, LOW);
+    delay(100);
 }
