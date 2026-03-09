@@ -1,10 +1,11 @@
 #include <Arduino.h>
-#include "blink.h"
+#include "blink_esp32.h"
+#define LED 2
 
 void setup() {
-    pinMode(LED_BUILTIN, OUTPUT);
+    pinMode(LED, OUTPUT);
 }
 
 void loop() {
-    blinkOnce(LED_BUILTIN);   // <-- PASS THE PIN
+    blinkOnce_esp32(LED);
 }
