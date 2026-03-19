@@ -2,56 +2,56 @@
 
 const int RPWM = 5;
 const int LPWM = 18;
+const int LEN  = 19;
+const int REN  = 21;
 
 const int chRPWM = 0;
 const int chLPWM = 1;
 
-const int pwmFreq = 1000;
-const int pwmResolution = 8;
-
-void motorForward(int speedVal);
-void motorReverse(int speedVal);
-void motorStop();
-
 void setup() {
-  Serial.begin(115200);
+    Serial.begin(115200);
 
-  // Force pins low first as plain GPIO
-  pinMode(RPWM, OUTPUT);
-  pinMode(LPWM, OUTPUT);
-  digitalWrite(RPWM, LOW);
-  digitalWrite(LPWM, LOW);
+    pinMode(RPWM, OUTPUT);
+    pinMode(LPWM, OUTPUT);
+    pinMode(LEN, OUTPUT);
+    pinMode(REN, OUTPUT);
 
-  delay(200);
+    // Start everything low
+    digitalWrite(RPWM, LOW);
+    digitalWrite(LPWM, LOW);
+    digitalWrite(LEN, LOW);
+    digitalWrite(REN, LOW);
 
-  // Setup PWM
-  ledcSetup(chRPWM, pwmFreq, pwmResolution);
-  ledcSetup(chLPWM, pwmFreq, pwmResolution);
+    delay(100);
 
-  ledcAttachPin(RPWM, chRPWM);
-  ledcAttachPin(LPWM, chLPWM);
+    // Setup PWM on ESP32
+    ledcSetup(chRPWM, 1000, 8);
+    ledcSetup(chLPWM, 1000, 8);
 
-  motorStop();
+    ledcAttachPin(RPWM, chRPWM);
+    ledcAttachPin(LPWM, chLPWM);
+
+    // Enable both sides of BTS7960
+    digitalWrite(LEN, HIGH);
+    digitalWrite(REN, HIGH);
+
+    // Motor off at startup
+    ledcWrite(chRPWM, 0);
+    ledcWrite(chLPWM, 0);
+
+    Serial.println("Motor driver enabled");
 }
 
 void loop() {
-  motorStop();
-  delay(1000);
-}
+    // Motor ON forward
+    ledcWrite(chLPWM, 0);
+    ledcWrite(chRPWM, 255);
+    Serial.println("Motor ON");
+    delay(3000);
 
-void motorForward(int speedVal) {
-  speedVal = constrain(speedVal, 0, 255);
-  ledcWrite(chLPWM, 0);
-  ledcWrite(chRPWM, speedVal);
-}
-
-void motorReverse(int speedVal) {
-  speedVal = constrain(speedVal, 0, 255);
-  ledcWrite(chRPWM, 0);
-  ledcWrite(chLPWM, speedVal);
-}
-
-void motorStop() {
-  ledcWrite(chRPWM, 0);
-  ledcWrite(chLPWM, 0);
+    // Motor OFF
+    ledcWrite(chRPWM, 0);
+    ledcWrite(chLPWM, 0);
+    Serial.println("Motor OFF");
+    delay(3000);
 }
