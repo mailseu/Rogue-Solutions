@@ -13,8 +13,9 @@ const int LEN2  = 27;
 const int REN2  = 14;
 
 // Receiver pins
-const int CH1_PIN = 34;   // steering (CH1)
-const int CH2_PIN = 35;   // throttle (CH2)
+const int CH1_PIN = 34;   // steering or right motor (CH1)
+const int CH2_PIN = 35;   // throttle or left motor (CH2)
+const int CH5_PIN = 39;   // SWA mode switch (CH3)
 
 // PWM channels
 const int chRPWM1 = 0;
@@ -23,9 +24,8 @@ const int chRPWM2 = 2;
 const int chLPWM2 = 3;
 
 void setup() {
-     Serial.begin(115200);
+    Serial.begin(115200);
 
-    // Motor outputs
     pinMode(RPWM1, OUTPUT);
     pinMode(LPWM1, OUTPUT);
     pinMode(LEN1, OUTPUT);
@@ -36,11 +36,10 @@ void setup() {
     pinMode(LEN2, OUTPUT);
     pinMode(REN2, OUTPUT);
 
-    // Receiver inputs
     pinMode(CH1_PIN, INPUT);
     pinMode(CH2_PIN, INPUT);
+    pinMode(CH5_PIN, INPUT);
 
-    // Start low
     digitalWrite(RPWM1, LOW);
     digitalWrite(LPWM1, LOW);
     digitalWrite(LEN1, LOW);
@@ -53,7 +52,6 @@ void setup() {
 
     delay(100);
 
-    // PWM setup
     ledcSetup(chRPWM1, 1000, 8);
     ledcSetup(chLPWM1, 1000, 8);
     ledcSetup(chRPWM2, 1000, 8);
@@ -64,13 +62,11 @@ void setup() {
     ledcAttachPin(RPWM2, chRPWM2);
     ledcAttachPin(LPWM2, chLPWM2);
 
-    // Enable both BTS7960 boards
     digitalWrite(LEN1, HIGH);
     digitalWrite(REN1, HIGH);
     digitalWrite(LEN2, HIGH);
     digitalWrite(REN2, HIGH);
 
-    // Motors off
     ledcWrite(chRPWM1, 0);
     ledcWrite(chLPWM1, 0);
     ledcWrite(chRPWM2, 0);
@@ -80,41 +76,59 @@ void setup() {
 }
 
 void loop() {
-    // Read receiver PWM pulses (typical RC: 1000 to 2000 us)
-    int ch1 = pulseIn(CH1_PIN, HIGH, 25000);   // steering
-    int ch2 = pulseIn(CH2_PIN, HIGH, 25000);   // throttle
+    int ch1 = pulseIn(CH1_PIN, HIGH, 50000);
+    int ch2 = pulseIn(CH2_PIN, HIGH, 50000);
+    int ch5 = pulseIn(CH5_PIN, HIGH, 50000);
 
-    // Failsafe if no signal
-    if (ch1 == 0 || ch2 == 0) {
+    // No Signal Check
+    if (ch1 == 0 || ch2 == 0 || ch5 == 0) {
         ledcWrite(chRPWM1, 0);
         ledcWrite(chLPWM1, 0);
         ledcWrite(chRPWM2, 0);
         ledcWrite(chLPWM2, 0);
 
-        Serial.println("No receiver signal");
+        Serial.println("No signal");
         delay(50);
         return;
     }
 
-    // Dead zones around stick center
+    // ARM SWITCH (CH5)
+    if (ch5 < 1500) {
+        ledcWrite(chRPWM1, 0);
+        ledcWrite(chLPWM1, 0);
+        ledcWrite(chRPWM2, 0);
+        ledcWrite(chLPWM2, 0);
+
+        Serial.println("DISARMED");
+        delay(100);
+        return;
+    }
+
+    // Input PWM Data (ONLY WHEN ARMED)
+    Serial.print("CH1: ");
+    Serial.print(ch1);
+    Serial.print("  CH2: ");
+    Serial.print(ch2);
+    Serial.print("  CH5: ");
+    Serial.print(ch5);
+
+    // Deadzone
     if (ch1 > 1470 && ch1 < 1530) ch1 = 1500;
     if (ch2 > 1470 && ch2 < 1530) ch2 = 1500;
 
-    // Convert throttle and steering to -255 .. 255
     int throttle = map(ch2, 1000, 2000, -255, 255);
     int steering = map(ch1, 1000, 2000, -255, 255);
 
-    // Mix for tank steering
     int leftMotor  = throttle + steering;
     int rightMotor = throttle - steering;
 
-    // Limit range
+    // Controller Limit
     if (leftMotor > 255) leftMotor = 255;
     if (leftMotor < -255) leftMotor = -255;
     if (rightMotor > 255) rightMotor = 255;
     if (rightMotor < -255) rightMotor = -255;
 
-    // LEFT MOTOR (Motor 1)
+    // Motor 1 Control
     if (leftMotor > 10) {
         ledcWrite(chLPWM1, 0);
         ledcWrite(chRPWM1, leftMotor);
@@ -128,7 +142,7 @@ void loop() {
         ledcWrite(chLPWM1, 0);
     }
 
-    // RIGHT MOTOR (Motor 2)
+    // Motor 2 Control
     if (rightMotor > 10) {
         ledcWrite(chLPWM2, 0);
         ledcWrite(chRPWM2, rightMotor);
@@ -142,15 +156,11 @@ void loop() {
         ledcWrite(chLPWM2, 0);
     }
 
-    // Serial debug
-    Serial.print("CH1: ");
-    Serial.print(ch1);
-    Serial.print("  CH2: ");
-    Serial.print(ch2);
-    Serial.print("  Left: ");
+    //Motor Output Data
+    Serial.print("  | L: ");
     Serial.print(leftMotor);
-    Serial.print("  Right: ");
+    Serial.print("  R: ");
     Serial.println(rightMotor);
 
-    delay(20);
+    delay(50);
 }
