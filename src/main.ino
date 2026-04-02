@@ -26,7 +26,7 @@ const int chRPWM2 = 2;
 const int chLPWM2 = 3;
 
 // Wi-Fi AP settings
-const char* apName = "ESP32-Motor-Monitor";
+const char* apName = "9 Lives ESP32";
 const char* apPass = "12345678";
 
 WebServer server(80);
@@ -143,7 +143,7 @@ void setup() {
     <html>
     <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>9LIVES Rover Monitor</title>
+    <title>9 LIVES Rover Monitor</title>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; background: #111; color: #eee; }
         h1 { margin-bottom: 8px; }
@@ -156,7 +156,7 @@ void setup() {
     </style>
     </head>
     <body>
-    <h1>9LIVES Rover Monitor</h1>
+    <h1>9 LIVES Rover Monitor</h1>
     <div class="card">
         <div class="row"><span class="label">Arm state</span><span id="armed">-</span></div>
         <div class="row"><span class="label">Signal</span><span id="signal">-</span></div>
@@ -168,18 +168,6 @@ void setup() {
         <div class="row"><span class="label">CH5</span><span id="ch5">0</span></div>
         <div class="row"><span class="label">Left motor</span><span id="left">0</span></div>
         <div class="row"><span class="label">Right motor</span><span id="right">0</span></div>
-    </div>
-
-    <div class="card">
-        <div class="row"><span class="label">Motor 1 pins</span><code>)rawliteral";
-            html += "RPWM1=" + String(RPWM1) + " LPWM1=" + String(LPWM1) + " LEN1=" + String(LEN1) + " REN1=" + String(REN1);
-            html += R"rawliteral(</code></div>
-        <div class="row"><span class="label">Motor 2 pins</span><code>)rawliteral";
-            html += "RPWM2=" + String(RPWM2) + " LPWM2=" + String(LPWM2) + " LEN2=" + String(LEN2) + " REN2=" + String(REN2);
-            html += R"rawliteral(</code></div>
-        <div class="row"><span class="label">RX pins</span><code>)rawliteral";
-            html += "CH1=" + String(CH1_PIN) + " CH2=" + String(CH2_PIN) + " CH5=" + String(CH5_PIN);
-            html += R"rawliteral(</code></div>
     </div>
 
     <script>
