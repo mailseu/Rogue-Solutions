@@ -15,9 +15,9 @@ const int LEN2  = 27;
 const int REN2  = 14;
 
 // Receiver pins
-const int CH1_PIN = 34;   // steering
-const int CH2_PIN = 35;   // throttle
-const int CH5_PIN = 39;   // SWA arm switch
+const int CH1_PIN = 34;   // Steering   
+const int CH2_PIN = 35;   // Throttle   
+const int CH5_PIN = 39;   // Arm Switch (SW-A)
 
 // PWM channels
 const int chRPWM1 = 0;
@@ -139,81 +139,81 @@ void setup() {
 
     server.on("/", []() {
         String html = R"rawliteral(
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ESP32 Motor Monitor</title>
-  <style>
-    body { font-family: Arial, sans-serif; margin: 20px; background: #111; color: #eee; }
-    h1 { margin-bottom: 8px; }
-    .card { background: #1c1c1c; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
-    .row { margin: 8px 0; font-size: 18px; }
-    .label { color: #aaa; display: inline-block; width: 120px; }
-    .ok { color: #5f5; font-weight: bold; }
-    .bad { color: #f66; font-weight: bold; }
-    code { color: #8fd; }
-  </style>
-</head>
-<body>
-  <h1>ESP32 Motor Monitor</h1>
-  <div class="card">
-    <div class="row"><span class="label">Arm state</span><span id="armed">-</span></div>
-    <div class="row"><span class="label">Signal</span><span id="signal">-</span></div>
-  </div>
+    <!DOCTYPE html>
+    <html>
+    <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>9LIVES Rover Monitor</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #111; color: #eee; }
+        h1 { margin-bottom: 8px; }
+        .card { background: #1c1c1c; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
+        .row { margin: 8px 0; font-size: 18px; }
+        .label { color: #aaa; display: inline-block; width: 120px; }
+        .ok { color: #5f5; font-weight: bold; }
+        .bad { color: #f66; font-weight: bold; }
+        code { color: #8fd; }
+    </style>
+    </head>
+    <body>
+    <h1>9LIVES Rover Monitor</h1>
+    <div class="card">
+        <div class="row"><span class="label">Arm state</span><span id="armed">-</span></div>
+        <div class="row"><span class="label">Signal</span><span id="signal">-</span></div>
+    </div>
 
-  <div class="card">
-    <div class="row"><span class="label">CH1</span><span id="ch1">0</span></div>
-    <div class="row"><span class="label">CH2</span><span id="ch2">0</span></div>
-    <div class="row"><span class="label">CH5</span><span id="ch5">0</span></div>
-    <div class="row"><span class="label">Left motor</span><span id="left">0</span></div>
-    <div class="row"><span class="label">Right motor</span><span id="right">0</span></div>
-  </div>
+    <div class="card">
+        <div class="row"><span class="label">CH1</span><span id="ch1">0</span></div>
+        <div class="row"><span class="label">CH2</span><span id="ch2">0</span></div>
+        <div class="row"><span class="label">CH5</span><span id="ch5">0</span></div>
+        <div class="row"><span class="label">Left motor</span><span id="left">0</span></div>
+        <div class="row"><span class="label">Right motor</span><span id="right">0</span></div>
+    </div>
 
-  <div class="card">
-    <div class="row"><span class="label">Motor 1 pins</span><code>)rawliteral";
-        html += "RPWM1=" + String(RPWM1) + " LPWM1=" + String(LPWM1) + " LEN1=" + String(LEN1) + " REN1=" + String(REN1);
-        html += R"rawliteral(</code></div>
-    <div class="row"><span class="label">Motor 2 pins</span><code>)rawliteral";
-        html += "RPWM2=" + String(RPWM2) + " LPWM2=" + String(LPWM2) + " LEN2=" + String(LEN2) + " REN2=" + String(REN2);
-        html += R"rawliteral(</code></div>
-    <div class="row"><span class="label">RX pins</span><code>)rawliteral";
-        html += "CH1=" + String(CH1_PIN) + " CH2=" + String(CH2_PIN) + " CH5=" + String(CH5_PIN);
-        html += R"rawliteral(</code></div>
-  </div>
+    <div class="card">
+        <div class="row"><span class="label">Motor 1 pins</span><code>)rawliteral";
+            html += "RPWM1=" + String(RPWM1) + " LPWM1=" + String(LPWM1) + " LEN1=" + String(LEN1) + " REN1=" + String(REN1);
+            html += R"rawliteral(</code></div>
+        <div class="row"><span class="label">Motor 2 pins</span><code>)rawliteral";
+            html += "RPWM2=" + String(RPWM2) + " LPWM2=" + String(LPWM2) + " LEN2=" + String(LEN2) + " REN2=" + String(REN2);
+            html += R"rawliteral(</code></div>
+        <div class="row"><span class="label">RX pins</span><code>)rawliteral";
+            html += "CH1=" + String(CH1_PIN) + " CH2=" + String(CH2_PIN) + " CH5=" + String(CH5_PIN);
+            html += R"rawliteral(</code></div>
+    </div>
 
-  <script>
-    async function updateData() {
-      try {
-        const r = await fetch('/data');
-        const d = await r.json();
+    <script>
+        async function updateData() {
+        try {
+            const r = await fetch('/data');
+            const d = await r.json();
 
-        document.getElementById('ch1').textContent = d.ch1;
-        document.getElementById('ch2').textContent = d.ch2;
-        document.getElementById('ch5').textContent = d.ch5;
-        document.getElementById('left').textContent = d.left;
-        document.getElementById('right').textContent = d.right;
+            document.getElementById('ch1').textContent = d.ch1;
+            document.getElementById('ch2').textContent = d.ch2;
+            document.getElementById('ch5').textContent = d.ch5;
+            document.getElementById('left').textContent = d.left;
+            document.getElementById('right').textContent = d.right;
 
-        const armed = document.getElementById('armed');
-        armed.textContent = d.armed ? 'ARMED' : 'DISARMED';
-        armed.className = d.armed ? 'ok' : 'bad';
+            const armed = document.getElementById('armed');
+            armed.textContent = d.armed ? 'ARMED' : 'DISARMED';
+            armed.className = d.armed ? 'ok' : 'bad';
 
-        const signal = document.getElementById('signal');
-        signal.textContent = d.signal ? 'OK' : 'NO SIGNAL';
-        signal.className = d.signal ? 'ok' : 'bad';
-      } catch (e) {
-        const signal = document.getElementById('signal');
-        signal.textContent = 'PAGE LOST CONNECTION';
-        signal.className = 'bad';
-      }
-    }
+            const signal = document.getElementById('signal');
+            signal.textContent = d.signal ? 'OK' : 'NO SIGNAL';
+            signal.className = d.signal ? 'ok' : 'bad';
+        } catch (e) {
+            const signal = document.getElementById('signal');
+            signal.textContent = 'PAGE LOST CONNECTION';
+            signal.className = 'bad';
+        }
+        }
 
-    setInterval(updateData, 200);
-    updateData();
-  </script>
-</body>
-</html>
-)rawliteral";
+        setInterval(updateData, 200);
+        updateData();
+    </script>
+    </body>
+    </html>
+    )rawliteral";
 
         server.send(200, "text/html", html);
     });
