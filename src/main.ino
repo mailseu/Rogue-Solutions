@@ -137,6 +137,7 @@ void setup() {
     Serial.print("Open browser to: http://");
     Serial.println(ip);
 
+    //Web server html, AI generated on https://chat.openai.com/ with some manual tweaks. It fetches data every 200ms to update the values on the page.
     server.on("/", []() {
         String html = R"rawliteral(
     <!DOCTYPE html>
@@ -195,7 +196,6 @@ void setup() {
             signal.className = 'bad';
         }
         }
-
         setInterval(updateData, 200);
         updateData();
     </script>
