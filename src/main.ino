@@ -17,7 +17,8 @@ const int REN2  = 14;
 // Receiver pins
 const int CH1_PIN = 34;   // Steering
 const int CH2_PIN = 35;   // Throttle
-const int CH5_PIN = 39;   // Arm Switch (SW-A)
+const int CH5_PIN = 39;   // Arm Switch
+const int CH6_PIN = 32;   // Mode Switch: Manual / Autonomous
 
 // PWM channels
 const int chRPWM1 = 0;
@@ -35,10 +36,53 @@ WebServer server(80);
 volatile int liveCH1 = 0;
 volatile int liveCH2 = 0;
 volatile int liveCH5 = 0;
+volatile int liveCH6 = 0;
 volatile int liveLeft = 0;
 volatile int liveRight = 0;
 volatile bool liveArmed = false;
 volatile bool liveSignalOK = false;
+volatile bool liveAutoMode = false;
+
+void stopMotors() {
+    ledcWrite(chRPWM1, 0);
+    ledcWrite(chLPWM1, 0);
+    ledcWrite(chRPWM2, 0);
+    ledcWrite(chLPWM2, 0);
+    liveLeft = 0;
+    liveRight = 0;
+}
+
+void setMotors(int leftMotor, int rightMotor) {
+    if (leftMotor > 255) leftMotor = 255;
+    if (leftMotor < -255) leftMotor = -255;
+    if (rightMotor > 255) rightMotor = 255;
+    if (rightMotor < -255) rightMotor = -255;
+
+    liveLeft = leftMotor;
+    liveRight = rightMotor;
+
+    if (leftMotor > 10) {
+        ledcWrite(chLPWM1, 0);
+        ledcWrite(chRPWM1, leftMotor);
+    } else if (leftMotor < -10) {
+        ledcWrite(chRPWM1, 0);
+        ledcWrite(chLPWM1, -leftMotor);
+    } else {
+        ledcWrite(chRPWM1, 0);
+        ledcWrite(chLPWM1, 0);
+    }
+
+    if (rightMotor > 10) {
+        ledcWrite(chLPWM2, 0);
+        ledcWrite(chRPWM2, rightMotor);
+    } else if (rightMotor < -10) {
+        ledcWrite(chRPWM2, 0);
+        ledcWrite(chLPWM2, -rightMotor);
+    } else {
+        ledcWrite(chRPWM2, 0);
+        ledcWrite(chLPWM2, 0);
+    }
+}
 
 void connectWiFi() {
     WiFi.mode(WIFI_STA);
@@ -82,6 +126,7 @@ void setup() {
     pinMode(CH1_PIN, INPUT);
     pinMode(CH2_PIN, INPUT);
     pinMode(CH5_PIN, INPUT);
+    pinMode(CH6_PIN, INPUT);
 
     digitalWrite(RPWM1, LOW);
     digitalWrite(LPWM1, LOW);
@@ -110,12 +155,9 @@ void setup() {
     digitalWrite(LEN2, HIGH);
     digitalWrite(REN2, HIGH);
 
-    ledcWrite(chRPWM1, 0);
-    ledcWrite(chLPWM1, 0);
-    ledcWrite(chRPWM2, 0);
-    ledcWrite(chLPWM2, 0);
+    stopMotors();
 
-    Serial.println("System ready (ARM switch active)");
+    Serial.println("System ready");
     Serial.println("===== PIN SETUP =====");
     Serial.print("Motor 1 -> RPWM1: ");
     Serial.print(RPWM1);
@@ -140,7 +182,9 @@ void setup() {
     Serial.print("  CH2_PIN: ");
     Serial.print(CH2_PIN);
     Serial.print("  CH5_PIN: ");
-    Serial.println(CH5_PIN);
+    Serial.print(CH5_PIN);
+    Serial.print("  CH6_PIN: ");
+    Serial.println(CH6_PIN);
 
     Serial.print("PWM Channels -> chRPWM1: ");
     Serial.print(chRPWM1);
@@ -169,20 +213,24 @@ void setup() {
         .label { color: #aaa; display: inline-block; width: 120px; }
         .ok { color: #5f5; font-weight: bold; }
         .bad { color: #f66; font-weight: bold; }
+        .mode { color: #6cf; font-weight: bold; }
         code { color: #8fd; }
     </style>
     </head>
     <body>
     <h1>9 LIVES Rover Monitor</h1>
+
     <div class="card">
         <div class="row"><span class="label">Arm state</span><span id="armed">-</span></div>
         <div class="row"><span class="label">Signal</span><span id="signal">-</span></div>
+        <div class="row"><span class="label">Mode</span><span id="mode">-</span></div>
     </div>
 
     <div class="card">
         <div class="row"><span class="label">CH1</span><span id="ch1">0</span></div>
         <div class="row"><span class="label">CH2</span><span id="ch2">0</span></div>
         <div class="row"><span class="label">CH5</span><span id="ch5">0</span></div>
+        <div class="row"><span class="label">CH6</span><span id="ch6">0</span></div>
         <div class="row"><span class="label">Left motor</span><span id="left">0</span></div>
         <div class="row"><span class="label">Right motor</span><span id="right">0</span></div>
     </div>
@@ -196,6 +244,7 @@ void setup() {
             document.getElementById('ch1').textContent = d.ch1;
             document.getElementById('ch2').textContent = d.ch2;
             document.getElementById('ch5').textContent = d.ch5;
+            document.getElementById('ch6').textContent = d.ch6;
             document.getElementById('left').textContent = d.left;
             document.getElementById('right').textContent = d.right;
 
@@ -206,6 +255,10 @@ void setup() {
             const signal = document.getElementById('signal');
             signal.textContent = d.signal ? 'OK' : 'NO SIGNAL';
             signal.className = d.signal ? 'ok' : 'bad';
+
+            const mode = document.getElementById('mode');
+            mode.textContent = d.auto ? 'AUTONOMOUS' : 'MANUAL';
+            mode.className = 'mode';
         } catch (e) {
             const signal = document.getElementById('signal');
             signal.textContent = 'PAGE LOST CONNECTION';
@@ -228,10 +281,12 @@ void setup() {
         json += "\"ch1\":" + String(liveCH1) + ",";
         json += "\"ch2\":" + String(liveCH2) + ",";
         json += "\"ch5\":" + String(liveCH5) + ",";
+        json += "\"ch6\":" + String(liveCH6) + ",";
         json += "\"left\":" + String(liveLeft) + ",";
         json += "\"right\":" + String(liveRight) + ",";
         json += "\"armed\":" + String(liveArmed ? "true" : "false") + ",";
-        json += "\"signal\":" + String(liveSignalOK ? "true" : "false");
+        json += "\"signal\":" + String(liveSignalOK ? "true" : "false") + ",";
+        json += "\"auto\":" + String(liveAutoMode ? "true" : "false");
         json += "}";
         server.send(200, "application/json", json);
     });
@@ -250,21 +305,18 @@ void loop() {
     int ch1 = pulseIn(CH1_PIN, HIGH, 50000);
     int ch2 = pulseIn(CH2_PIN, HIGH, 50000);
     int ch5 = pulseIn(CH5_PIN, HIGH, 50000);
+    int ch6 = pulseIn(CH6_PIN, HIGH, 50000);
 
     liveCH1 = ch1;
     liveCH2 = ch2;
     liveCH5 = ch5;
+    liveCH6 = ch6;
 
-    if (ch1 == 0 || ch2 == 0 || ch5 == 0) {
-        ledcWrite(chRPWM1, 0);
-        ledcWrite(chLPWM1, 0);
-        ledcWrite(chRPWM2, 0);
-        ledcWrite(chLPWM2, 0);
-
-        liveLeft = 0;
-        liveRight = 0;
+    if (ch1 == 0 || ch2 == 0 || ch5 == 0 || ch6 == 0) {
+        stopMotors();
         liveArmed = false;
         liveSignalOK = false;
+        liveAutoMode = false;
 
         Serial.println("No signal");
         delay(50);
@@ -274,13 +326,7 @@ void loop() {
     liveSignalOK = true;
 
     if (ch5 < 1500) {
-        ledcWrite(chRPWM1, 0);
-        ledcWrite(chLPWM1, 0);
-        ledcWrite(chRPWM2, 0);
-        ledcWrite(chLPWM2, 0);
-
-        liveLeft = 0;
-        liveRight = 0;
+        stopMotors();
         liveArmed = false;
 
         Serial.println("DISARMED");
@@ -290,6 +336,30 @@ void loop() {
 
     liveArmed = true;
 
+    // Mode switch
+    // Change this logic if your switch direction is reversed
+    liveAutoMode = (ch6 > 1500);
+
+    if (liveAutoMode) {
+        // AUTONOMOUS MODE
+        // Replace these example values later with your AI / HUSKYLENS logic
+        int autoLeft = 120;
+        int autoRight = 120;
+
+        setMotors(autoLeft, autoRight);
+
+        Serial.print("AUTO MODE | CH6: ");
+        Serial.print(ch6);
+        Serial.print("  | L: ");
+        Serial.print(autoLeft);
+        Serial.print("  R: ");
+        Serial.println(autoRight);
+
+        delay(50);
+        return;
+    }
+
+    // MANUAL MODE
     if (ch1 > 1470 && ch1 < 1530) ch1 = 1500;
     if (ch2 > 1470 && ch2 < 1530) ch2 = 1500;
 
@@ -304,37 +374,16 @@ void loop() {
     if (rightMotor > 255) rightMotor = 255;
     if (rightMotor < -255) rightMotor = -255;
 
-    liveLeft = leftMotor;
-    liveRight = rightMotor;
+    setMotors(leftMotor, rightMotor);
 
-    if (leftMotor > 10) {
-        ledcWrite(chLPWM1, 0);
-        ledcWrite(chRPWM1, leftMotor);
-    } else if (leftMotor < -10) {
-        ledcWrite(chRPWM1, 0);
-        ledcWrite(chLPWM1, -leftMotor);
-    } else {
-        ledcWrite(chRPWM1, 0);
-        ledcWrite(chLPWM1, 0);
-    }
-
-    if (rightMotor > 10) {
-        ledcWrite(chLPWM2, 0);
-        ledcWrite(chRPWM2, rightMotor);
-    } else if (rightMotor < -10) {
-        ledcWrite(chRPWM2, 0);
-        ledcWrite(chLPWM2, -rightMotor);
-    } else {
-        ledcWrite(chRPWM2, 0);
-        ledcWrite(chLPWM2, 0);
-    }
-
-    Serial.print("CH1: ");
+    Serial.print("MANUAL MODE | CH1: ");
     Serial.print(ch1);
     Serial.print("  CH2: ");
     Serial.print(ch2);
     Serial.print("  CH5: ");
     Serial.print(ch5);
+    Serial.print("  CH6: ");
+    Serial.print(ch6);
     Serial.print("  | L: ");
     Serial.print(leftMotor);
     Serial.print("  R: ");
