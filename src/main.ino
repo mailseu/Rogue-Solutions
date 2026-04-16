@@ -3,7 +3,7 @@
 #include <WebServer.h>
 
 // Motor 1 pins
-const int RPWM1 = 5;
+const int RPWM1 = 23;
 const int LPWM1 = 18;
 const int LEN1  = 19;
 const int REN1  = 21;
@@ -15,8 +15,8 @@ const int LEN2  = 27;
 const int REN2  = 14;
 
 // Receiver pins
-const int CH1_PIN = 34;   // Steering   
-const int CH2_PIN = 35;   // Throttle   
+const int CH1_PIN = 34;   // Steering
+const int CH2_PIN = 35;   // Throttle
 const int CH5_PIN = 39;   // Arm Switch (SW-A)
 
 // PWM channels
@@ -25,9 +25,9 @@ const int chLPWM1 = 1;
 const int chRPWM2 = 2;
 const int chLPWM2 = 3;
 
-// Wi-Fi AP settings
-const char* apName = "9 Lives ESP32";
-const char* apPass = "12345678";
+// Phone hotspot settings
+const char* ssid = "hms";
+const char* password = "vjtn9fk4965g37lg";
 
 WebServer server(80);
 
@@ -39,6 +39,32 @@ volatile int liveLeft = 0;
 volatile int liveRight = 0;
 volatile bool liveArmed = false;
 volatile bool liveSignalOK = false;
+
+void connectWiFi() {
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+
+    Serial.print("Connecting to hotspot");
+    int tries = 0;
+
+    while (WiFi.status() != WL_CONNECTED && tries < 30) {
+        delay(500);
+        Serial.print(".");
+        tries++;
+    }
+
+    Serial.println();
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("Connected to hotspot");
+        Serial.print("ESP32 IP address: ");
+        Serial.println(WiFi.localIP());
+        Serial.print("Open browser to: http://");
+        Serial.println(WiFi.localIP());
+    } else {
+        Serial.println("Failed to connect to hotspot");
+    }
+}
 
 void setup() {
     Serial.begin(115200);
@@ -126,16 +152,7 @@ void setup() {
     Serial.println(chLPWM2);
     Serial.println("=====================");
 
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(apName, apPass);
-    IPAddress ip = WiFi.softAPIP();
-
-    Serial.print("Wi-Fi AP ready. SSID: ");
-    Serial.println(apName);
-    Serial.print("Password: ");
-    Serial.println(apPass);
-    Serial.print("Open browser to: http://");
-    Serial.println(ip);
+    connectWiFi();
 
     server.on("/", []() {
         String html = R"rawliteral(
@@ -225,6 +242,10 @@ void setup() {
 
 void loop() {
     server.handleClient();
+
+    if (WiFi.status() != WL_CONNECTED) {
+        connectWiFi();
+    }
 
     int ch1 = pulseIn(CH1_PIN, HIGH, 50000);
     int ch2 = pulseIn(CH2_PIN, HIGH, 50000);
@@ -317,15 +338,7 @@ void loop() {
     Serial.print("  | L: ");
     Serial.print(leftMotor);
     Serial.print("  R: ");
-    Serial.print(rightMotor);
-    Serial.print("  | RPWM1: ");
-    Serial.print(RPWM1);
-    Serial.print("  LPWM1: ");
-    Serial.print(LPWM1);
-    Serial.print("  RPWM2: ");
-    Serial.print(RPWM2);
-    Serial.print("  LPWM2: ");
-    Serial.println(LPWM2);
+    Serial.println(rightMotor);
 
     delay(50);
 }
