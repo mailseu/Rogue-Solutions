@@ -337,7 +337,6 @@ void loop() {
     liveArmed = true;
 
     // Mode switch
-    // Change this logic if your switch direction is reversed
     liveAutoMode = (ch6 > 1500);
 
     if (liveAutoMode) {
