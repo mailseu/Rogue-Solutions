@@ -18,7 +18,7 @@ const int REN2  = 14;
 const int CH1_PIN = 34;   // Steering
 const int CH2_PIN = 35;   // Throttle
 const int CH5_PIN = 39;   // Arm Switch
-const int CH6_PIN = 32;   // Mode Switch: Manual / Autonomous
+const int CH6_PIN = 13;   // Mode Switch: Manual / Autonomous
 
 // PWM channels
 const int chRPWM1 = 0;
