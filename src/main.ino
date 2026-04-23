@@ -20,6 +20,9 @@ const int CH2_PIN = 35;   // Throttle
 const int CH5_PIN = 39;   // Arm Switch
 const int CH6_PIN = 13;   // Mode Switch: Manual / Autonomous
 
+// Battery monitor pin
+const int BATTERY_PIN = 32;   // Voltage divider output to ADC
+
 // PWM channels
 const int chRPWM1 = 0;
 const int chLPWM1 = 1;
@@ -32,6 +35,21 @@ const char* password = "vjtn9fk4965g37lg";
 
 WebServer server(80);
 
+// Divider values
+const float R1 = 100000.0;   // 100k
+const float R2 = 22000.0;    // 22k
+const float DIVIDER_RATIO = (R1 + R2) / R2;   // 122k / 22k = 5.54545
+
+// ADC settings
+const float ADC_REF = 3.3;
+const int ADC_MAX = 4095;
+
+// Calibration factor
+float BATTERY_CAL = 1.037;
+
+// Battery info
+const int CELL_COUNT = 4;
+
 // Live values for USB serial + web page
 volatile int liveCH1 = 0;
 volatile int liveCH2 = 0;
@@ -42,6 +60,9 @@ volatile int liveRight = 0;
 volatile bool liveArmed = false;
 volatile bool liveSignalOK = false;
 volatile bool liveAutoMode = false;
+volatile float liveBatteryPack = 0.0;
+volatile float liveBatteryCell = 0.0;
+volatile int liveBatteryPercent = 0;
 
 void stopMotors() {
     ledcWrite(chRPWM1, 0);
@@ -82,6 +103,41 @@ void setMotors(int leftMotor, int rightMotor) {
         ledcWrite(chRPWM2, 0);
         ledcWrite(chLPWM2, 0);
     }
+}
+
+float readBatteryVoltage() {
+    long sum = 0;
+    const int samples = 50;
+
+    for (int i = 0; i < samples; i++) {
+        sum += analogRead(BATTERY_PIN);
+        delay(2);
+    }
+
+    float raw = sum / (float)samples;
+    float pinVoltage = (raw / ADC_MAX) * ADC_REF;
+    float packVoltage = pinVoltage * DIVIDER_RATIO * BATTERY_CAL;
+
+    return packVoltage;
+}
+
+int batteryPercentFromCellVoltage(float cellVoltage) {
+    // Simple 4.2V full to 3.3V empty estimate
+    float percent = ((cellVoltage - 3.3) / (4.2 - 3.3)) * 100.0;
+
+    if (percent > 100.0) percent = 100.0;
+    if (percent < 0.0) percent = 0.0;
+
+    return (int)(percent + 0.5);
+}
+
+void updateBatteryReadings() {
+    float packVoltage = readBatteryVoltage();
+    float cellVoltage = packVoltage / CELL_COUNT;
+
+    liveBatteryPack = packVoltage;
+    liveBatteryCell = cellVoltage;
+    liveBatteryPercent = batteryPercentFromCellVoltage(cellVoltage);
 }
 
 void connectWiFi() {
@@ -128,6 +184,8 @@ void setup() {
     pinMode(CH5_PIN, INPUT);
     pinMode(CH6_PIN, INPUT);
 
+    pinMode(BATTERY_PIN, INPUT);
+
     digitalWrite(RPWM1, LOW);
     digitalWrite(LPWM1, LOW);
     digitalWrite(LEN1, LOW);
@@ -154,6 +212,8 @@ void setup() {
     digitalWrite(REN1, HIGH);
     digitalWrite(LEN2, HIGH);
     digitalWrite(REN2, HIGH);
+
+    analogReadResolution(12);
 
     stopMotors();
 
@@ -186,6 +246,9 @@ void setup() {
     Serial.print("  CH6_PIN: ");
     Serial.println(CH6_PIN);
 
+    Serial.print("Battery ADC -> BATTERY_PIN: ");
+    Serial.println(BATTERY_PIN);
+
     Serial.print("PWM Channels -> chRPWM1: ");
     Serial.print(chRPWM1);
     Serial.print("  chLPWM1: ");
@@ -210,10 +273,11 @@ void setup() {
         h1 { margin-bottom: 8px; }
         .card { background: #1c1c1c; border-radius: 12px; padding: 16px; margin-bottom: 14px; }
         .row { margin: 8px 0; font-size: 18px; }
-        .label { color: #aaa; display: inline-block; width: 120px; }
+        .label { color: #aaa; display: inline-block; width: 140px; }
         .ok { color: #5f5; font-weight: bold; }
         .bad { color: #f66; font-weight: bold; }
         .mode { color: #6cf; font-weight: bold; }
+        .battery { color: #ffd166; font-weight: bold; }
         code { color: #8fd; }
     </style>
     </head>
@@ -224,6 +288,12 @@ void setup() {
         <div class="row"><span class="label">Arm state</span><span id="armed">-</span></div>
         <div class="row"><span class="label">Signal</span><span id="signal">-</span></div>
         <div class="row"><span class="label">Mode</span><span id="mode">-</span></div>
+    </div>
+
+    <div class="card">
+        <div class="row"><span class="label">Pack voltage</span><span id="battPack" class="battery">0.00 V</span></div>
+        <div class="row"><span class="label">Per cell</span><span id="battCell" class="battery">0.00 V</span></div>
+        <div class="row"><span class="label">Battery</span><span id="battPercent" class="battery">0%</span></div>
     </div>
 
     <div class="card">
@@ -248,6 +318,10 @@ void setup() {
             document.getElementById('left').textContent = d.left;
             document.getElementById('right').textContent = d.right;
 
+            document.getElementById('battPack').textContent = d.battPack.toFixed(2) + ' V';
+            document.getElementById('battCell').textContent = d.battCell.toFixed(3) + ' V';
+            document.getElementById('battPercent').textContent = d.battPercent + '%';
+
             const armed = document.getElementById('armed');
             armed.textContent = d.armed ? 'ARMED' : 'DISARMED';
             armed.className = d.armed ? 'ok' : 'bad';
@@ -266,7 +340,7 @@ void setup() {
         }
         }
 
-        setInterval(updateData, 200);
+        setInterval(updateData, 500);
         updateData();
     </script>
     </body>
@@ -286,7 +360,10 @@ void setup() {
         json += "\"right\":" + String(liveRight) + ",";
         json += "\"armed\":" + String(liveArmed ? "true" : "false") + ",";
         json += "\"signal\":" + String(liveSignalOK ? "true" : "false") + ",";
-        json += "\"auto\":" + String(liveAutoMode ? "true" : "false");
+        json += "\"auto\":" + String(liveAutoMode ? "true" : "false") + ",";
+        json += "\"battPack\":" + String(liveBatteryPack, 2) + ",";
+        json += "\"battCell\":" + String(liveBatteryCell, 3) + ",";
+        json += "\"battPercent\":" + String(liveBatteryPercent);
         json += "}";
         server.send(200, "application/json", json);
     });
@@ -301,6 +378,8 @@ void loop() {
     if (WiFi.status() != WL_CONNECTED) {
         connectWiFi();
     }
+
+    updateBatteryReadings();
 
     int ch1 = pulseIn(CH1_PIN, HIGH, 50000);
     int ch2 = pulseIn(CH2_PIN, HIGH, 50000);
@@ -318,7 +397,14 @@ void loop() {
         liveSignalOK = false;
         liveAutoMode = false;
 
-        Serial.println("No signal");
+        Serial.print("No signal | Pack: ");
+        Serial.print(liveBatteryPack, 2);
+        Serial.print(" V | Cell: ");
+        Serial.print(liveBatteryCell, 3);
+        Serial.print(" V | Battery: ");
+        Serial.print(liveBatteryPercent);
+        Serial.println("%");
+
         delay(50);
         return;
     }
@@ -329,7 +415,14 @@ void loop() {
         stopMotors();
         liveArmed = false;
 
-        Serial.println("DISARMED");
+        Serial.print("DISARMED | Pack: ");
+        Serial.print(liveBatteryPack, 2);
+        Serial.print(" V | Cell: ");
+        Serial.print(liveBatteryCell, 3);
+        Serial.print(" V | Battery: ");
+        Serial.print(liveBatteryPercent);
+        Serial.println("%");
+
         delay(50);
         return;
     }
@@ -340,8 +433,6 @@ void loop() {
     liveAutoMode = (ch6 > 1500);
 
     if (liveAutoMode) {
-        // AUTONOMOUS MODE
-        // Replace these example values later with your AI / HUSKYLENS logic
         int autoLeft = 120;
         int autoRight = 120;
 
@@ -349,16 +440,22 @@ void loop() {
 
         Serial.print("AUTO MODE | CH6: ");
         Serial.print(ch6);
-        Serial.print("  | L: ");
+        Serial.print(" | L: ");
         Serial.print(autoLeft);
-        Serial.print("  R: ");
-        Serial.println(autoRight);
+        Serial.print(" R: ");
+        Serial.print(autoRight);
+        Serial.print(" | Pack: ");
+        Serial.print(liveBatteryPack, 2);
+        Serial.print(" V | Cell: ");
+        Serial.print(liveBatteryCell, 3);
+        Serial.print(" V | Battery: ");
+        Serial.print(liveBatteryPercent);
+        Serial.println("%");
 
         delay(50);
         return;
     }
 
-    // MANUAL MODE
     if (ch1 > 1470 && ch1 < 1530) ch1 = 1500;
     if (ch2 > 1470 && ch2 < 1530) ch2 = 1500;
 
@@ -377,16 +474,23 @@ void loop() {
 
     Serial.print("MANUAL MODE | CH1: ");
     Serial.print(ch1);
-    Serial.print("  CH2: ");
+    Serial.print(" CH2: ");
     Serial.print(ch2);
-    Serial.print("  CH5: ");
+    Serial.print(" CH5: ");
     Serial.print(ch5);
-    Serial.print("  CH6: ");
+    Serial.print(" CH6: ");
     Serial.print(ch6);
-    Serial.print("  | L: ");
+    Serial.print(" | L: ");
     Serial.print(leftMotor);
-    Serial.print("  R: ");
-    Serial.println(rightMotor);
+    Serial.print(" R: ");
+    Serial.print(rightMotor);
+    Serial.print(" | Pack: ");
+    Serial.print(liveBatteryPack, 2);
+    Serial.print(" V | Cell: ");
+    Serial.print(liveBatteryCell, 3);
+    Serial.print(" V | Battery: ");
+    Serial.print(liveBatteryPercent);
+    Serial.println("%");
 
     delay(50);
 }
