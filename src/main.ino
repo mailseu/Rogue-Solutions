@@ -5,8 +5,8 @@
 // Motor 1 pins
 const int RPWM1 = 23;
 const int LPWM1 = 18;
-const int LEN1  = 19;
-const int REN1  = 21;
+const int LEN1  = 21;
+const int REN1  = 19;
 
 // Motor 2 pins
 const int RPWM2 = 25;
@@ -30,27 +30,23 @@ const int chRPWM2 = 2;
 const int chLPWM2 = 3;
 
 // Phone hotspot settings
-const char* ssid = "hms";
+const char* ssid = "FrontMesh4608";
 const char* password = "vjtn9fk4965g37lg";
 
 WebServer server(80);
 
-// Divider values
+// Battery divider calibration
 const float R1 = 100000.0;   // 100k
 const float R2 = 22000.0;    // 22k
 const float DIVIDER_RATIO = (R1 + R2) / R2;   // 122k / 22k = 5.54545
 
-// ADC settings
 const float ADC_REF = 3.3;
 const int ADC_MAX = 4095;
 
-// Calibration factor
 float BATTERY_CAL = 1.037;
-
-// Battery info
 const int CELL_COUNT = 4;
 
-// Live values for USB serial + web page
+//Values for USB serial & Web page
 volatile int liveCH1 = 0;
 volatile int liveCH2 = 0;
 volatile int liveCH5 = 0;
@@ -122,7 +118,6 @@ float readBatteryVoltage() {
 }
 
 int batteryPercentFromCellVoltage(float cellVoltage) {
-    // Simple 4.2V full to 3.3V empty estimate
     float percent = ((cellVoltage - 3.3) / (4.2 - 3.3)) * 100.0;
 
     if (percent > 100.0) percent = 100.0;
