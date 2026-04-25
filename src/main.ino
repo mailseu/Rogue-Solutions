@@ -78,6 +78,7 @@ void setMotors(int leftMotor, int rightMotor) {
     liveLeft = leftMotor;
     liveRight = rightMotor;
 
+    // LEFT MOTOR = normal
     if (leftMotor > 10) {
         ledcWrite(chLPWM1, 0);
         ledcWrite(chRPWM1, leftMotor);
@@ -89,12 +90,13 @@ void setMotors(int leftMotor, int rightMotor) {
         ledcWrite(chLPWM1, 0);
     }
 
+    // RIGHT MOTOR = inverted
     if (rightMotor > 10) {
-        ledcWrite(chLPWM2, 0);
-        ledcWrite(chRPWM2, rightMotor);
-    } else if (rightMotor < -10) {
         ledcWrite(chRPWM2, 0);
-        ledcWrite(chLPWM2, -rightMotor);
+        ledcWrite(chLPWM2, rightMotor);
+    } else if (rightMotor < -10) {
+        ledcWrite(chLPWM2, 0);
+        ledcWrite(chRPWM2, -rightMotor);
     } else {
         ledcWrite(chRPWM2, 0);
         ledcWrite(chLPWM2, 0);
@@ -121,7 +123,6 @@ int batteryPercentFromCellVoltage(float cellVoltage) {
     float percent = ((cellVoltage - 3.3) / (4.2 - 3.3)) * 100.0;
 
     if (percent > 100.0) percent = 100.0;
-    if (percent < 0.0) percent = 0.0;
 
     return (int)(percent + 0.5);
 }
