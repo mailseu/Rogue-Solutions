@@ -30,7 +30,7 @@ const int chRPWM2 = 2;
 const int chLPWM2 = 3;
 
 // Phone hotspot settings
-const char* ssid = "FrontMesh4608";
+const char* ssid = "hms";
 const char* password = "vjtn9fk4965g37lg";
 
 WebServer server(80);
@@ -38,7 +38,7 @@ WebServer server(80);
 // Battery divider calibration
 const float R1 = 100000.0;   // 100k
 const float R2 = 22000.0;    // 22k
-const float DIVIDER_RATIO = (R1 + R2) / R2;   // 122k / 22k = 5.54545
+const float DIVIDER_RATIO = (R1 + R2) / R2;
 
 const float ADC_REF = 3.3;
 const int ADC_MAX = 4095;
@@ -46,7 +46,13 @@ const int ADC_MAX = 4095;
 float BATTERY_CAL = 1.037;
 const int CELL_COUNT = 4;
 
-//Values for USB serial & Web page
+// Battery smoothing
+float filteredPackVoltage = 0.0;
+bool batteryFilterInitialized = false;
+unsigned long lastBatteryUpdate = 0;
+const unsigned long batteryInterval = 200;   // ms
+
+// Values for USB serial & Web page     
 volatile int liveCH1 = 0;
 volatile int liveCH2 = 0;
 volatile int liveCH5 = 0;
@@ -105,11 +111,11 @@ void setMotors(int leftMotor, int rightMotor) {
 
 float readBatteryVoltage() {
     long sum = 0;
-    const int samples = 50;
+    const int samples = 80;
 
     for (int i = 0; i < samples; i++) {
         sum += analogRead(BATTERY_PIN);
-        delay(2);
+        delay(1);
     }
 
     float raw = sum / (float)samples;
@@ -120,8 +126,12 @@ float readBatteryVoltage() {
 }
 
 int batteryPercentFromCellVoltage(float cellVoltage) {
+    if (cellVoltage < 3.3) cellVoltage = 3.3;
+    if (cellVoltage > 4.2) cellVoltage = 4.2;
+
     float percent = ((cellVoltage - 3.3) / (4.2 - 3.3)) * 100.0;
 
+    if (percent < 0.0) percent = 0.0;
     if (percent > 100.0) percent = 100.0;
 
     return (int)(percent + 0.5);
@@ -129,9 +139,21 @@ int batteryPercentFromCellVoltage(float cellVoltage) {
 
 void updateBatteryReadings() {
     float packVoltage = readBatteryVoltage();
-    float cellVoltage = packVoltage / CELL_COUNT;
+    const float alpha = 0.05; // Lower alpha = more stable, slower response (Battery Percentage)
 
-    liveBatteryPack = packVoltage;
+    if (!batteryFilterInitialized) {
+        filteredPackVoltage = packVoltage;
+        batteryFilterInitialized = true;
+    } else {
+        filteredPackVoltage = (alpha * packVoltage) + ((1.0 - alpha) * filteredPackVoltage);
+    }
+
+    float cellVoltage = filteredPackVoltage / CELL_COUNT;
+
+    if (cellVoltage < 3.3) cellVoltage = 3.3;
+    if (cellVoltage > 4.2) cellVoltage = 4.2;
+
+    liveBatteryPack = filteredPackVoltage;
     liveBatteryCell = cellVoltage;
     liveBatteryPercent = batteryPercentFromCellVoltage(cellVoltage);
 }
@@ -210,8 +232,8 @@ void setup() {
     digitalWrite(REN2, HIGH);
 
     analogReadResolution(12);
-
     stopMotors();
+    updateBatteryReadings();
 
     Serial.println("System ready");
     Serial.println("===== PIN SETUP =====");
@@ -375,7 +397,10 @@ void loop() {
         connectWiFi();
     }
 
-    updateBatteryReadings();
+    if (millis() - lastBatteryUpdate >= batteryInterval) {
+        lastBatteryUpdate = millis();
+        updateBatteryReadings();
+    }
 
     int ch1 = pulseIn(CH1_PIN, HIGH, 50000);
     int ch2 = pulseIn(CH2_PIN, HIGH, 50000);
