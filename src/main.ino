@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Wire.h>
+#include "HUSKYLENS.h"
 
 // Motor 1 pins
 const int RPWM1 = 23;
@@ -30,10 +32,40 @@ const int chRPWM2 = 2;
 const int chLPWM2 = 3;
 
 // Phone hotspot settings
-const char* ssid = "hms";
+const char* ssid = "FrontMesh4608";
 const char* password = "vjtn9fk4965g37lg";
 
 WebServer server(80);
+
+HUSKYLENS huskylens;
+
+// HUSKYLENS I2C pins
+const int HUSKY_SDA = 22;
+const int HUSKY_SCL = 33;
+
+// Autonomous tracking tuning
+const int FRAME_CENTER_X = 160;         // Frame center for ~320px wide HUSKYLENS image
+const int TRACK_DEADBAND = 20;          // Ignore small left/right error
+const int AUTO_BASE_SPEED = 105;        // Forward speed while tracking
+const int AUTO_TURN_GAIN = 1;           // Steering gain from tracking error
+const int AUTO_MAX_TURN = 120;          // Limit steering correction
+const int TARGET_WIDTH_STOP = 95;       // Stop when target appears large enough
+const int TARGET_WIDTH_SLOW = 65;       // Slow down when target gets close
+const int LOST_TARGET_TIMEOUT = 600;    // ms before declaring target lost
+
+// Autonomous / HUSKYLENS live data
+volatile bool liveHuskyConnected = false;
+volatile bool liveTargetDetected = false;
+volatile bool liveTargetLearned = false;
+volatile int liveTargetID = 0;
+volatile int liveTargetX = 0;
+volatile int liveTargetY = 0;
+volatile int liveTargetWidth = 0;
+volatile int liveTargetHeight = 0;
+volatile int liveTrackingError = 0;
+const char* liveAutoState = "IDLE";
+
+unsigned long lastTargetSeenTime = 0;
 
 // Battery divider calibration
 const float R1 = 100000.0;   // 100k
@@ -158,6 +190,163 @@ void updateBatteryReadings() {
     liveBatteryPercent = batteryPercentFromCellVoltage(cellVoltage);
 }
 
+void resetTrackingData() {
+    liveTargetDetected = false;
+    liveTargetLearned = false;
+    liveTargetID = 0;
+    liveTargetX = 0;
+    liveTargetY = 0;
+    liveTargetWidth = 0;
+    liveTargetHeight = 0;
+    liveTrackingError = 0;
+}
+
+void initHuskyLens() {
+    Wire.begin(HUSKY_SDA, HUSKY_SCL);
+
+    Serial.println("Initializing HUSKYLENS...");
+
+    if (huskylens.begin(Wire)) {
+        liveHuskyConnected = true;
+        Serial.println("HUSKYLENS connected over I2C");
+    } else {
+        liveHuskyConnected = false;
+        Serial.println("HUSKYLENS connection failed");
+        Serial.println("Check HUSKYLENS protocol is set to I2C");
+        Serial.println("Check SDA -> GPIO 22 and SCL -> GPIO 33");
+    }
+}
+
+bool readTrackedObject() {
+    liveTargetLearned = false;
+    resetTrackingData();
+
+    if (!huskylens.request()) {
+        liveAutoState = "HUSKY REQUEST FAIL";
+        return false;
+    }
+
+    if (!huskylens.isLearned()) {
+        liveTargetLearned = false;
+        liveAutoState = "NOT LEARNED";
+        return false;
+    }
+
+    liveTargetLearned = true;
+
+    if (!huskylens.available()) {
+        liveAutoState = "NO TARGET";
+        return false;
+    }
+
+    HUSKYLENSResult bestResult;
+    bool foundBlock = false;
+    int bestArea = 0;
+
+    while (huskylens.available()) {
+        HUSKYLENSResult result = huskylens.read();
+
+        if (result.command == COMMAND_RETURN_BLOCK) {
+            int area = result.width * result.height;
+
+            if (!foundBlock || area > bestArea) {
+                bestArea = area;
+                bestResult = result;
+                foundBlock = true;
+            }
+        }
+    }
+
+    if (!foundBlock) {
+        liveAutoState = "NO BLOCK";
+        return false;
+    }
+
+    liveTargetDetected = true;
+    liveTargetID = bestResult.ID;
+    liveTargetX = bestResult.xCenter;
+    liveTargetY = bestResult.yCenter;
+    liveTargetWidth = bestResult.width;
+    liveTargetHeight = bestResult.height;
+    liveTrackingError = bestResult.xCenter - FRAME_CENTER_X;
+
+    lastTargetSeenTime = millis();
+    return true;
+}
+
+void runAutonomousTracking() {
+    if (!liveHuskyConnected) {
+        stopMotors();
+        liveAutoState = "HUSKY OFFLINE";
+        return;
+    }
+
+    bool targetOK = readTrackedObject();
+
+    if (!targetOK) {
+        if (liveAutoState == "NOT LEARNED" || liveAutoState == "HUSKY REQUEST FAIL") {
+            stopMotors();
+            return;
+        }
+
+        if (millis() - lastTargetSeenTime < LOST_TARGET_TIMEOUT) {
+            int searchTurn = 75;
+            setMotors(-searchTurn, searchTurn);
+
+            if (liveAutoState == "NO TARGET" || liveAutoState == "NO BLOCK") {
+                liveAutoState = "SEARCHING";
+            }
+        } else {
+            stopMotors();
+
+            if (liveAutoState == "NO TARGET" || liveAutoState == "NO BLOCK") {
+                liveAutoState = "TARGET LOST";
+            }
+        }
+        return;
+    }
+
+    int error = liveTrackingError;
+    int absError = abs(error);
+
+    int turn = error * AUTO_TURN_GAIN;
+    if (turn > AUTO_MAX_TURN) turn = AUTO_MAX_TURN;
+    if (turn < -AUTO_MAX_TURN) turn = -AUTO_MAX_TURN;
+
+    int baseSpeed = AUTO_BASE_SPEED;
+
+    if (liveTargetWidth >= TARGET_WIDTH_STOP) {
+        stopMotors();
+        liveAutoState = "TARGET REACHED";
+        return;
+    } else if (liveTargetWidth >= TARGET_WIDTH_SLOW) {
+        baseSpeed = 70;
+    }
+
+    if (absError <= TRACK_DEADBAND) {
+        int leftMotor = baseSpeed;
+        int rightMotor = baseSpeed;
+        setMotors(leftMotor, rightMotor);
+        liveAutoState = "TRACKING CENTERED";
+    } else {
+        int leftMotor = baseSpeed + turn;
+        int rightMotor = baseSpeed - turn;
+
+        if (leftMotor > 255) leftMotor = 255;
+        if (leftMotor < -255) leftMotor = -255;
+        if (rightMotor > 255) rightMotor = 255;
+        if (rightMotor < -255) rightMotor = -255;
+
+        setMotors(leftMotor, rightMotor);
+
+        if (error < 0) {
+            liveAutoState = "TURN LEFT";
+        } else {
+            liveAutoState = "TURN RIGHT";
+        }
+    }
+}
+
 void connectWiFi() {
     WiFi.mode(WIFI_STA);
     WiFi.begin(ssid, password);
@@ -277,7 +466,13 @@ void setup() {
     Serial.println(chLPWM2);
     Serial.println("=====================");
 
+    Serial.print("HUSKYLENS I2C -> SDA: ");
+    Serial.print(HUSKY_SDA);
+    Serial.print("  SCL: ");
+    Serial.println(HUSKY_SCL);
+
     connectWiFi();
+    initHuskyLens();
 
     server.on("/", []() {
         String html = R"rawliteral(
@@ -306,6 +501,19 @@ void setup() {
         <div class="row"><span class="label">Arm state</span><span id="armed">-</span></div>
         <div class="row"><span class="label">Signal</span><span id="signal">-</span></div>
         <div class="row"><span class="label">Mode</span><span id="mode">-</span></div>
+    </div>
+
+    <div class="card">
+        <div class="row"><span class="label">Auto state</span><span id="autoState" class="mode">-</span></div>
+        <div class="row"><span class="label">HUSKY link</span><span id="husky">-</span></div>
+        <div class="row"><span class="label">Learned</span><span id="learned">-</span></div>
+        <div class="row"><span class="label">Target</span><span id="target">-</span></div>
+        <div class="row"><span class="label">Target ID</span><span id="targetID">0</span></div>
+        <div class="row"><span class="label">X center</span><span id="targetX">0</span></div>
+        <div class="row"><span class="label">Y center</span><span id="targetY">0</span></div>
+        <div class="row"><span class="label">Width</span><span id="targetW">0</span></div>
+        <div class="row"><span class="label">Height</span><span id="targetH">0</span></div>
+        <div class="row"><span class="label">X error</span><span id="trackErr">0</span></div>
     </div>
 
     <div class="card">
@@ -340,6 +548,14 @@ void setup() {
             document.getElementById('battCell').textContent = d.battCell.toFixed(3) + ' V';
             document.getElementById('battPercent').textContent = d.battPercent + '%';
 
+            document.getElementById('autoState').textContent = d.autoState;
+            document.getElementById('targetID').textContent = d.targetID;
+            document.getElementById('targetX').textContent = d.targetX;
+            document.getElementById('targetY').textContent = d.targetY;
+            document.getElementById('targetW').textContent = d.targetW;
+            document.getElementById('targetH').textContent = d.targetH;
+            document.getElementById('trackErr').textContent = d.trackErr;
+
             const armed = document.getElementById('armed');
             armed.textContent = d.armed ? 'ARMED' : 'DISARMED';
             armed.className = d.armed ? 'ok' : 'bad';
@@ -351,6 +567,19 @@ void setup() {
             const mode = document.getElementById('mode');
             mode.textContent = d.auto ? 'AUTONOMOUS' : 'MANUAL';
             mode.className = 'mode';
+
+            const husky = document.getElementById('husky');
+            husky.textContent = d.husky ? 'CONNECTED' : 'OFFLINE';
+            husky.className = d.husky ? 'ok' : 'bad';
+
+            const learned = document.getElementById('learned');
+            learned.textContent = d.learned ? 'YES' : 'NO';
+            learned.className = d.learned ? 'ok' : 'bad';
+
+            const target = document.getElementById('target');
+            target.textContent = d.target ? 'DETECTED' : 'NOT DETECTED';
+            target.className = d.target ? 'ok' : 'bad';
+
         } catch (e) {
             const signal = document.getElementById('signal');
             signal.textContent = 'PAGE LOST CONNECTION';
@@ -379,6 +608,16 @@ void setup() {
         json += "\"armed\":" + String(liveArmed ? "true" : "false") + ",";
         json += "\"signal\":" + String(liveSignalOK ? "true" : "false") + ",";
         json += "\"auto\":" + String(liveAutoMode ? "true" : "false") + ",";
+        json += "\"husky\":" + String(liveHuskyConnected ? "true" : "false") + ",";
+        json += "\"learned\":" + String(liveTargetLearned ? "true" : "false") + ",";
+        json += "\"target\":" + String(liveTargetDetected ? "true" : "false") + ",";
+        json += "\"targetID\":" + String(liveTargetID) + ",";
+        json += "\"targetX\":" + String(liveTargetX) + ",";
+        json += "\"targetY\":" + String(liveTargetY) + ",";
+        json += "\"targetW\":" + String(liveTargetWidth) + ",";
+        json += "\"targetH\":" + String(liveTargetHeight) + ",";
+        json += "\"trackErr\":" + String(liveTrackingError) + ",";
+        json += "\"autoState\":\"" + String(liveAutoState) + "\",";
         json += "\"battPack\":" + String(liveBatteryPack, 2) + ",";
         json += "\"battCell\":" + String(liveBatteryCell, 3) + ",";
         json += "\"battPercent\":" + String(liveBatteryPercent);
@@ -417,6 +656,8 @@ void loop() {
         liveArmed = false;
         liveSignalOK = false;
         liveAutoMode = false;
+        liveAutoState = "NO SIGNAL";
+        resetTrackingData();
 
         Serial.print("No signal | Pack: ");
         Serial.print(liveBatteryPack, 2);
@@ -435,6 +676,9 @@ void loop() {
     if (ch5 < 1500) {
         stopMotors();
         liveArmed = false;
+        liveAutoMode = false;
+        liveAutoState = "DISARMED";
+        resetTrackingData();
 
         Serial.print("DISARMED | Pack: ");
         Serial.print(liveBatteryPack, 2);
@@ -454,17 +698,26 @@ void loop() {
     liveAutoMode = (ch6 > 1500);
 
     if (liveAutoMode) {
-        int autoLeft = 120;
-        int autoRight = 120;
-
-        setMotors(autoLeft, autoRight);
+        runAutonomousTracking();
 
         Serial.print("AUTO MODE | CH6: ");
         Serial.print(ch6);
+        Serial.print(" | State: ");
+        Serial.print(liveAutoState);
+        Serial.print(" | Target: ");
+        Serial.print(liveTargetDetected ? "YES" : "NO");
+        Serial.print(" | ID: ");
+        Serial.print(liveTargetID);
+        Serial.print(" | X: ");
+        Serial.print(liveTargetX);
+        Serial.print(" | W: ");
+        Serial.print(liveTargetWidth);
+        Serial.print(" | Err: ");
+        Serial.print(liveTrackingError);
         Serial.print(" | L: ");
-        Serial.print(autoLeft);
+        Serial.print(liveLeft);
         Serial.print(" R: ");
-        Serial.print(autoRight);
+        Serial.print(liveRight);
         Serial.print(" | Pack: ");
         Serial.print(liveBatteryPack, 2);
         Serial.print(" V | Cell: ");
@@ -476,6 +729,9 @@ void loop() {
         delay(50);
         return;
     }
+    
+    liveAutoState = "MANUAL";
+    resetTrackingData();
 
     if (ch1 > 1470 && ch1 < 1530) ch1 = 1500;
     if (ch2 > 1470 && ch2 < 1530) ch2 = 1500;
