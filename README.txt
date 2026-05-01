@@ -5,7 +5,7 @@ EE 400D Electrical Engineering Senior Capstone Project
 
 Engineering team:
 
-Henry Samala - Electrical Design Engineer (Repository Admin)
+Henry Samala - Electrical & Software Engineer (Repository Admin)
 Justin Nguyen - Embedded Firmware Engineer
-Adrian Tamayo - Control Systems Engineer
+Adrian Tamayo - Mechanical Systems Engineer
 Eduardo Sotelo - Test/Validation Engineer
