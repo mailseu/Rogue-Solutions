@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <Wire.h>
+#include "DFRobot_HuskylensV2.h"
 
 // Motor 1 pins
 const int RPWM1 = 23;
@@ -29,8 +31,19 @@ const int chLPWM1 = 1;
 const int chRPWM2 = 2;
 const int chLPWM2 = 3;
 
+//HuskeyLens 2 AI Vision Camrea
+const int HUSKY_SDA = 33;
+const int HUSKY_SCL = 22;
+
+HuskylensV2 huskylens;
+
+volatile bool liveTagDetected = false;
+volatile int liveTagID = 0;
+volatile int liveTagX = 0;
+volatile int liveTagY = 0;
+
 // Phone hotspot settings
-const char* ssid = "hms";
+const char* ssid = "FrontMesh4608";
 const char* password = "vjtn9fk4965g37lg";
 
 WebServer server(80);
@@ -187,6 +200,19 @@ void connectWiFi() {
 void setup() {
     Serial.begin(115200);
 
+    Wire.begin(HUSKY_SDA, HUSKY_SCL);
+
+    Serial.println("Starting HuskyLens...");
+
+    while (!huskylens.begin(Wire)) {
+        Serial.println("HuskyLens not detected. Check SDA/SCL, power, and protocol.");
+        delay(1000);
+    }
+
+    Serial.println("HuskyLens connected!");
+    huskylens.switchAlgorithm(ALGORITHM_TAG_RECOGNITION);
+    Serial.println("HuskyLens set to TAG RECOGNITION mode.");
+
     pinMode(RPWM1, OUTPUT);
     pinMode(LPWM1, OUTPUT);
     pinMode(LEN1, OUTPUT);
@@ -323,6 +349,13 @@ void setup() {
         <div class="row"><span class="label">Right motor</span><span id="right">0</span></div>
     </div>
 
+    <div class="card">
+        <div class="row"><span class="label">Tag detected</span><span id="tagDetected">-</span></div>
+        <div class="row"><span class="label">Tag ID</span><span id="tagID">0</span></div>
+        <div class="row"><span class="label">Tag X</span><span id="tagX">0</span></div>
+        <div class="row"><span class="label">Tag Y</span><span id="tagY">0</span></div>
+    </div>
+
     <script>
         async function updateData() {
         try {
@@ -339,6 +372,11 @@ void setup() {
             document.getElementById('battPack').textContent = d.battPack.toFixed(2) + ' V';
             document.getElementById('battCell').textContent = d.battCell.toFixed(3) + ' V';
             document.getElementById('battPercent').textContent = d.battPercent + '%';
+
+            document.getElementById('tagDetected').textContent = d.tagDetected ? 'YES' : 'NO';
+            document.getElementById('tagID').textContent = d.tagID;
+            document.getElementById('tagX').textContent = d.tagX;
+            document.getElementById('tagY').textContent = d.tagY;
 
             const armed = document.getElementById('armed');
             armed.textContent = d.armed ? 'ARMED' : 'DISARMED';
@@ -381,7 +419,11 @@ void setup() {
         json += "\"auto\":" + String(liveAutoMode ? "true" : "false") + ",";
         json += "\"battPack\":" + String(liveBatteryPack, 2) + ",";
         json += "\"battCell\":" + String(liveBatteryCell, 3) + ",";
-        json += "\"battPercent\":" + String(liveBatteryPercent);
+        json += "\"battPercent\":" + String(liveBatteryPercent) + ",";
+        json += "\"tagDetected\":" + String(liveTagDetected ? "true" : "false") + ",";
+        json += "\"tagID\":" + String(liveTagID) + ",";
+        json += "\"tagX\":" + String(liveTagX) + ",";
+        json += "\"tagY\":" + String(liveTagY);
         json += "}";
         server.send(200, "application/json", json);
     });
@@ -412,11 +454,16 @@ void loop() {
     liveCH5 = ch5;
     liveCH6 = ch6;
 
-    if (ch1 == 0 || ch2 == 0 || ch5 == 0 || ch6 == 0) {
+    if (ch1 == 0 || ch2 == 0 || ch5 == 0 || ch6 == 0) { //Signal Check
         stopMotors();
         liveArmed = false;
         liveSignalOK = false;
         liveAutoMode = false;
+
+        liveTagDetected = false;
+        liveTagID = 0;
+        liveTagX = 0;
+        liveTagY = 0;
 
         Serial.print("No signal | Pack: ");
         Serial.print(liveBatteryPack, 2);
@@ -432,9 +479,14 @@ void loop() {
 
     liveSignalOK = true;
 
-    if (ch5 < 1500) {
+    if (ch5 < 1500) { //Disarmed Check
         stopMotors();
         liveArmed = false;
+
+        liveTagDetected = false;
+        liveTagID = 0;
+        liveTagX = 0;
+        liveTagY = 0;
 
         Serial.print("DISARMED | Pack: ");
         Serial.print(liveBatteryPack, 2);
@@ -454,28 +506,70 @@ void loop() {
     liveAutoMode = (ch6 > 1500);
 
     if (liveAutoMode) {
-        int autoLeft = 120;
-        int autoRight = 120;
+        huskylens.getResult(ALGORITHM_TAG_RECOGNITION);
 
-        setMotors(autoLeft, autoRight);
+        if (huskylens.available(ALGORITHM_TAG_RECOGNITION)) {
+            auto centerResult = huskylens.getCachedCenterResult(ALGORITHM_TAG_RECOGNITION);
 
-        Serial.print("AUTO MODE | CH6: ");
-        Serial.print(ch6);
-        Serial.print(" | L: ");
-        Serial.print(autoLeft);
-        Serial.print(" R: ");
-        Serial.print(autoRight);
-        Serial.print(" | Pack: ");
-        Serial.print(liveBatteryPack, 2);
-        Serial.print(" V | Cell: ");
-        Serial.print(liveBatteryCell, 3);
-        Serial.print(" V | Battery: ");
-        Serial.print(liveBatteryPercent);
-        Serial.println("%");
+            int tagID = RET_ITEM_NUM(centerResult, Result, ID);
+            int tagX  = RET_ITEM_NUM(centerResult, Result, xCenter);
+            int tagY  = RET_ITEM_NUM(centerResult, Result, yCenter);
+
+            liveTagDetected = true;
+            liveTagID = tagID;
+            liveTagX = tagX;
+            liveTagY = tagY;
+
+            int targetX = 160;
+            int error = tagX - targetX;
+
+            int baseSpeed = 80;
+            float turnGain = 0.6;
+            int deadband = 25;
+
+            int turn = 0;
+
+            if (abs(error) > deadband) {
+                turn = error * turnGain;
+            }
+
+            if (turn > 90) turn = 90;
+            if (turn < -90) turn = -90;
+
+            int autoLeft = baseSpeed + turn;
+            int autoRight = baseSpeed - turn;
+
+            setMotors(autoLeft, autoRight);
+
+            Serial.print("AUTO TRACK | Tag ID: ");
+            Serial.print(tagID);
+            Serial.print(" X: ");
+            Serial.print(tagX);
+            Serial.print(" Y: ");
+            Serial.print(tagY);
+            Serial.print(" Error: ");
+            Serial.print(error);
+            Serial.print(" | L: ");
+            Serial.print(autoLeft);
+            Serial.print(" R: ");
+            Serial.println(autoRight);
+        } 
+        else {
+            liveTagDetected = false;
+            liveTagID = 0;
+            liveTagX = 0;
+            liveTagY = 0;
+
+            stopMotors();
+
+            Serial.println("AUTO MODE | No tag detected. Motors stopped.");
+        }
 
         delay(50);
         return;
     }
+
+    // ===== MANUAL MODE =====
 
     if (ch1 > 1470 && ch1 < 1530) ch1 = 1500;
     if (ch2 > 1470 && ch2 < 1530) ch2 = 1500;
