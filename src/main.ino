@@ -2,8 +2,8 @@
 #include <Wire.h>
 #include "DFRobot_HuskylensV2.h"
 
-const int HUSKY_SDA = 33;
-const int HUSKY_SCL = 22;
+const int HUSKY_SDA = 22;
+const int HUSKY_SCL = 33;
 
 HuskylensV2 huskylens;
 
