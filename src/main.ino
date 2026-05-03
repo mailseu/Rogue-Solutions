@@ -207,16 +207,17 @@ void setup() {
 
     Serial.println("Starting HuskyLens...");
 
-    while (!huskylens.begin(Wire)) {
-        Serial.println("HuskyLens not detected. Check SDA/SCL, power, and protocol.");
-        delay(1000);
+    if (huskylens.begin(Wire)) {
+        liveHuskyConnected = true;
+
+        Serial.println("HuskyLens connected!");
+        huskylens.switchAlgorithm(ALGORITHM_TAG_RECOGNITION);
+        Serial.println("HuskyLens set to TAG RECOGNITION mode.");
+    } else {
+        liveHuskyConnected = false;
+
+        Serial.println("HuskyLens not detected. Continuing without camera.");
     }
-
-    liveHuskyConnected = true;
-
-    Serial.println("HuskyLens connected!");
-    huskylens.switchAlgorithm(ALGORITHM_TAG_RECOGNITION);
-    Serial.println("HuskyLens set to TAG RECOGNITION mode.");
 
     pinMode(RPWM1, OUTPUT);
     pinMode(LPWM1, OUTPUT);
@@ -446,8 +447,16 @@ void setup() {
 void loop() {
     server.handleClient();
 
+    // Do not block robot control if WiFi disconnects
     if (WiFi.status() != WL_CONNECTED) {
-        connectWiFi();
+        static unsigned long lastWiFiTry = 0;
+
+        if (millis() - lastWiFiTry > 5000) {
+            lastWiFiTry = millis();
+            WiFi.disconnect();
+            WiFi.begin(ssid, password);
+            Serial.println("WiFi disconnected. Retrying in background...");
+        }
     }
 
     if (millis() - lastBatteryUpdate >= batteryInterval) {
@@ -517,6 +526,19 @@ void loop() {
     liveAutoMode = (ch6 > 1500);
 
     if (liveAutoMode) {
+        if (!liveHuskyConnected) {
+            stopMotors();
+
+            liveTagDetected = false;
+            liveTagID = 0;
+            liveTagX = 0;
+            liveTagY = 0;
+            
+            Serial.println("AUTO MODE | Camera not connected. Motors stopped.");
+            delay(50);
+            return;
+        }
+
         huskylens.getResult(ALGORITHM_TAG_RECOGNITION);
 
         if (huskylens.available(ALGORITHM_TAG_RECOGNITION)) {
@@ -536,8 +558,8 @@ void loop() {
             int targetX = 160;
             int errorX = tagX - targetX;
 
-            int desiredWidth = 120;
-            int stopWidth = 170;
+            int desiredWidth = 80;
+            int stopWidth = 110;
 
             int baseSpeed = 0;
 
@@ -605,7 +627,7 @@ void loop() {
 
             // Keep moving briefly if we JUST lost the tag
             if (millis() - lastTagSeenTime < 400) {
-                setMotors(180, 180);   // keep going forward
+                setMotors(150, 150);   // keep going forward
                 Serial.println("AUTO MODE | Brief tag loss. Continuing forward.");
             } else {
                 stopMotors();
