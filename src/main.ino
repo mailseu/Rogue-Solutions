@@ -32,8 +32,8 @@ const int chRPWM2 = 2;
 const int chLPWM2 = 3;
 
 //HuskeyLens 2 AI Vision Camrea
-const int HUSKY_SDA = 33;
-const int HUSKY_SCL = 22;
+const int HUSKY_SDA = 22;
+const int HUSKY_SCL = 33;
 
 HuskylensV2 huskylens;
 
@@ -41,6 +41,8 @@ volatile bool liveTagDetected = false;
 volatile int liveTagID = 0;
 volatile int liveTagX = 0;
 volatile int liveTagY = 0;
+
+unsigned long lastTagSeenTime = 0;
 
 // Phone hotspot settings
 const char* ssid = "FrontMesh4608";
@@ -78,6 +80,7 @@ volatile bool liveAutoMode = false;
 volatile float liveBatteryPack = 0.0;
 volatile float liveBatteryCell = 0.0;
 volatile int liveBatteryPercent = 0;
+volatile bool liveHuskyConnected = false;
 
 void stopMotors() {
     ledcWrite(chRPWM1, 0);
@@ -209,6 +212,8 @@ void setup() {
         delay(1000);
     }
 
+    liveHuskyConnected = true;
+
     Serial.println("HuskyLens connected!");
     huskylens.switchAlgorithm(ALGORITHM_TAG_RECOGNITION);
     Serial.println("HuskyLens set to TAG RECOGNITION mode.");
@@ -332,6 +337,7 @@ void setup() {
         <div class="row"><span class="label">Arm state</span><span id="armed">-</span></div>
         <div class="row"><span class="label">Signal</span><span id="signal">-</span></div>
         <div class="row"><span class="label">Mode</span><span id="mode">-</span></div>
+        <div class="row"><span class="label">Camera</span><span id="camera">-</span></div>
     </div>
 
     <div class="card">
@@ -389,6 +395,10 @@ void setup() {
             const mode = document.getElementById('mode');
             mode.textContent = d.auto ? 'AUTONOMOUS' : 'MANUAL';
             mode.className = 'mode';
+
+            const camera = document.getElementById('camera');
+            camera.textContent = d.camera ? 'CONNECTED' : 'NOT CONNECTED';
+            camera.className = d.camera ? 'ok' : 'bad';
         } catch (e) {
             const signal = document.getElementById('signal');
             signal.textContent = 'PAGE LOST CONNECTION';
@@ -417,6 +427,7 @@ void setup() {
         json += "\"armed\":" + String(liveArmed ? "true" : "false") + ",";
         json += "\"signal\":" + String(liveSignalOK ? "true" : "false") + ",";
         json += "\"auto\":" + String(liveAutoMode ? "true" : "false") + ",";
+        json += "\"camera\":" + String(liveHuskyConnected ? "true" : "false") + ",";
         json += "\"battPack\":" + String(liveBatteryPack, 2) + ",";
         json += "\"battCell\":" + String(liveBatteryCell, 3) + ",";
         json += "\"battPercent\":" + String(liveBatteryPercent) + ",";
@@ -514,41 +525,73 @@ void loop() {
             int tagID = RET_ITEM_NUM(centerResult, Result, ID);
             int tagX  = RET_ITEM_NUM(centerResult, Result, xCenter);
             int tagY  = RET_ITEM_NUM(centerResult, Result, yCenter);
+            int tagWidth = RET_ITEM_NUM(centerResult, Result, width);
 
             liveTagDetected = true;
             liveTagID = tagID;
             liveTagX = tagX;
             liveTagY = tagY;
+            lastTagSeenTime = millis(); 
 
             int targetX = 160;
-            int error = tagX - targetX;
+            int errorX = tagX - targetX;
 
-            int baseSpeed = 80;
-            float turnGain = 0.6;
-            int deadband = 25;
+            int desiredWidth = 120;
+            int stopWidth = 170;
+
+            int baseSpeed = 0;
+
+            if (tagWidth < desiredWidth) {
+                baseSpeed = 210;
+            } else if (tagWidth >= stopWidth) {
+                baseSpeed = 0;
+            } else {
+                baseSpeed = 180;
+            }
+
+            float turnGain = 0.25;
+            int deadband = 50;
 
             int turn = 0;
 
-            if (abs(error) > deadband) {
-                turn = error * turnGain;
+            if (abs(errorX) > deadband) {
+                turn = errorX * turnGain;
             }
 
-            if (turn > 90) turn = 90;
-            if (turn < -90) turn = -90;
+            if (turn > 45) turn = 45;
+            if (turn < -45) turn = -45;
 
-            int autoLeft = baseSpeed + turn;
-            int autoRight = baseSpeed - turn;
+            if (abs(errorX) <= deadband) {
+                turn = 0;
+            }
+
+            int autoLeft = baseSpeed;
+            int autoRight = baseSpeed;
+
+            if (turn != 0) {
+                autoLeft = baseSpeed + turn;
+                autoRight = baseSpeed - turn;
+            }
+
+            if (baseSpeed == 0) {
+                autoLeft = 0;
+                autoRight = 0;
+            }
 
             setMotors(autoLeft, autoRight);
 
-            Serial.print("AUTO TRACK | Tag ID: ");
+            Serial.print("AUTO TRACK | ID: ");
             Serial.print(tagID);
             Serial.print(" X: ");
             Serial.print(tagX);
             Serial.print(" Y: ");
             Serial.print(tagY);
-            Serial.print(" Error: ");
-            Serial.print(error);
+            Serial.print(" W: ");
+            Serial.print(tagWidth);
+            Serial.print(" ErrorX: ");
+            Serial.print(errorX);
+            Serial.print(" Turn: ");
+            Serial.print(turn);
             Serial.print(" | L: ");
             Serial.print(autoLeft);
             Serial.print(" R: ");
@@ -560,16 +603,21 @@ void loop() {
             liveTagX = 0;
             liveTagY = 0;
 
-            stopMotors();
-
-            Serial.println("AUTO MODE | No tag detected. Motors stopped.");
+            // Keep moving briefly if we JUST lost the tag
+            if (millis() - lastTagSeenTime < 400) {
+                setMotors(180, 180);   // keep going forward
+                Serial.println("AUTO MODE | Brief tag loss. Continuing forward.");
+            } else {
+                stopMotors();
+                Serial.println("AUTO MODE | No tag detected. Motors stopped.");
+            }
         }
 
         delay(50);
         return;
     }
 
-    // ===== MANUAL MODE =====
+    //MANUAL MODE
 
     if (ch1 > 1470 && ch1 < 1530) ch1 = 1500;
     if (ch2 > 1470 && ch2 < 1530) ch2 = 1500;
