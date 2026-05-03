@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Wire.h>
+#include <LiquidCrystal_I2C.h>
 #include "DFRobot_HuskylensV2.h"
 
 // Motor 1 pins
@@ -43,6 +44,13 @@ volatile int liveTagX = 0;
 volatile int liveTagY = 0;
 
 unsigned long lastTagSeenTime = 0;
+
+// LCD Display
+LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+unsigned long lastLCDSwitch = 0;
+const unsigned long lcdSwitchInterval = 5000;
+int lcdScreen = 0;
 
 // Phone hotspot settings
 const char* ssid = "FrontMesh4608";
@@ -195,8 +203,53 @@ void connectWiFi() {
         Serial.println(WiFi.localIP());
         Serial.print("Open browser to: http://");
         Serial.println(WiFi.localIP());
+
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("IP Address:");
+        lcd.setCursor(0, 1);
+        lcd.print(WiFi.localIP());
+        lastLCDSwitch = millis();
+        lcdScreen = 0;
+
     } else {
         Serial.println("Failed to connect to hotspot");
+    }
+}
+
+void updateLCD() {
+    if (millis() - lastLCDSwitch >= lcdSwitchInterval) {
+        lastLCDSwitch = millis();
+        lcdScreen++;
+        if (lcdScreen > 1) lcdScreen = 0;
+
+        lcd.clear();
+
+        if (lcdScreen == 0) {
+            lcd.setCursor(0, 0);
+            lcd.print("IP Address:");
+
+            lcd.setCursor(0, 1);
+            if (WiFi.status() == WL_CONNECTED) {
+                lcd.print(WiFi.localIP());
+            } else {
+                lcd.print("No WiFi");
+            }
+        }
+
+        if (lcdScreen == 1) {
+            lcd.setCursor(0, 0);
+            lcd.print("Pack:");
+            lcd.print(liveBatteryPack, 1);
+            lcd.print("V");
+
+            lcd.setCursor(0, 1);
+            lcd.print("Cell:");
+            lcd.print(liveBatteryCell, 2);
+            lcd.print("V ");
+            lcd.print(liveBatteryPercent);
+            lcd.print("%");
+        }
     }
 }
 
@@ -204,6 +257,14 @@ void setup() {
     Serial.begin(115200);
 
     Wire.begin(HUSKY_SDA, HUSKY_SCL);
+    
+    lcd.init();
+    lcd.backlight();
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("9 LIVES Rover");
+    lcd.setCursor(0, 1);
+    lcd.print("Starting...");
 
     Serial.println("Starting HuskyLens...");
 
@@ -446,6 +507,7 @@ void setup() {
 
 void loop() {
     server.handleClient();
+    updateLCD();
 
     // Do not block robot control if WiFi disconnects
     if (WiFi.status() != WL_CONNECTED) {
