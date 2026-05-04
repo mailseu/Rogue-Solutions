@@ -48,12 +48,8 @@ unsigned long lastTagSeenTime = 0;
 // LCD Display
 LiquidCrystal_I2C lcd(0x27, 16, 2);
 
-unsigned long lastLCDSwitch = 0;
-const unsigned long lcdSwitchInterval = 5000;
-int lcdScreen = 0;
-
 // Phone hotspot settings
-const char* ssid = "FrontMesh4608";
+const char* ssid = "hms";
 const char* password = "vjtn9fk4965g37lg";
 
 WebServer server(80);
@@ -163,7 +159,7 @@ int batteryPercentFromCellVoltage(float cellVoltage) {
 
 void updateBatteryReadings() {
     float packVoltage = readBatteryVoltage();
-    const float alpha = 0.05; // Lower alpha = more stable, slower response (Battery Percentage)
+    const float alpha = 0.05;
 
     if (!batteryFilterInitialized) {
         filteredPackVoltage = packVoltage;
@@ -173,9 +169,6 @@ void updateBatteryReadings() {
     }
 
     float cellVoltage = filteredPackVoltage / CELL_COUNT;
-
-    if (cellVoltage < 3.3) cellVoltage = 3.3;
-    if (cellVoltage > 4.2) cellVoltage = 4.2;
 
     liveBatteryPack = filteredPackVoltage;
     liveBatteryCell = cellVoltage;
@@ -209,8 +202,6 @@ void connectWiFi() {
         lcd.print("IP Address:");
         lcd.setCursor(0, 1);
         lcd.print(WiFi.localIP());
-        lastLCDSwitch = millis();
-        lcdScreen = 0;
 
     } else {
         Serial.println("Failed to connect to hotspot");
@@ -218,37 +209,32 @@ void connectWiFi() {
 }
 
 void updateLCD() {
-    if (millis() - lastLCDSwitch >= lcdSwitchInterval) {
-        lastLCDSwitch = millis();
-        lcdScreen++;
-        if (lcdScreen > 1) lcdScreen = 0;
+    static unsigned long lastLCDUpdate = 0;
 
-        lcd.clear();
+    if (millis() - lastLCDUpdate < 1000) return;
+    lastLCDUpdate = millis();
 
-        if (lcdScreen == 0) {
-            lcd.setCursor(0, 0);
-            lcd.print("IP Address:");
+    // Line 1: IP Address
+    lcd.setCursor(0, 0);
+    if (WiFi.status() == WL_CONNECTED) {
+        lcd.print(WiFi.localIP());
+        lcd.print(" ");  // clear leftover chars
+    } else {
+        lcd.print("No WiFi        ");
+    }
 
-            lcd.setCursor(0, 1);
-            if (WiFi.status() == WL_CONNECTED) {
-                lcd.print(WiFi.localIP());
-            } else {
-                lcd.print("No WiFi");
-            }
-        }
+    // Line 2: Arm / Mode
+    lcd.setCursor(0, 1);
 
-        if (lcdScreen == 1) {
-            lcd.setCursor(0, 0);
-            lcd.print("Pack:");
-            lcd.print(liveBatteryPack, 1);
-            lcd.print("V");
+    if (!liveArmed) {
+        lcd.print("DISARMED       ");
+    } else {
+        lcd.print("ARM ");
 
-            lcd.setCursor(0, 1);
-            lcd.print("Cell:");
-            lcd.print(liveBatteryCell, 2);
-            lcd.print("V ");
-            lcd.print(liveBatteryPercent);
-            lcd.print("%");
+        if (liveAutoMode) {
+            lcd.print("AUTO     ");
+        } else {
+            lcd.print("MANUAL   ");
         }
     }
 }
@@ -257,7 +243,11 @@ void setup() {
     Serial.begin(115200);
 
     Wire.begin(HUSKY_SDA, HUSKY_SCL);
-    
+
+    analogReadResolution(12);
+    pinMode(BATTERY_PIN, INPUT);
+    stopMotors();
+
     lcd.init();
     lcd.backlight();
     lcd.clear();
@@ -323,10 +313,6 @@ void setup() {
     digitalWrite(REN1, HIGH);
     digitalWrite(LEN2, HIGH);
     digitalWrite(REN2, HIGH);
-
-    analogReadResolution(12);
-    stopMotors();
-    updateBatteryReadings();
 
     Serial.println("System ready");
     Serial.println("===== PIN SETUP =====");
