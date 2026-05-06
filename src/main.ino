@@ -45,7 +45,7 @@ volatile int liveTagY = 0;
 unsigned long lastTagSeenTime = 0;
 
 // Phone hotspot settings
-const char* ssid = "FrontMesh4608";
+const char* ssid = "hms";
 const char* password = "vjtn9fk4965g37lg";
 
 WebServer server(80);
@@ -155,7 +155,7 @@ int batteryPercentFromCellVoltage(float cellVoltage) {
 
 void updateBatteryReadings() {
     float packVoltage = readBatteryVoltage();
-    const float alpha = 0.05; // Lower alpha = more stable, slower response (Battery Percentage)
+    const float alpha = 0.05;
 
     if (!batteryFilterInitialized) {
         filteredPackVoltage = packVoltage;
@@ -165,9 +165,6 @@ void updateBatteryReadings() {
     }
 
     float cellVoltage = filteredPackVoltage / CELL_COUNT;
-
-    if (cellVoltage < 3.3) cellVoltage = 3.3;
-    if (cellVoltage > 4.2) cellVoltage = 4.2;
 
     liveBatteryPack = filteredPackVoltage;
     liveBatteryCell = cellVoltage;
@@ -195,8 +192,46 @@ void connectWiFi() {
         Serial.println(WiFi.localIP());
         Serial.print("Open browser to: http://");
         Serial.println(WiFi.localIP());
+
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("IP Address:");
+        lcd.setCursor(0, 1);
+        lcd.print(WiFi.localIP());
+
     } else {
         Serial.println("Failed to connect to hotspot");
+    }
+}
+
+void updateLCD() {
+    static unsigned long lastLCDUpdate = 0;
+
+    if (millis() - lastLCDUpdate < 1000) return;
+    lastLCDUpdate = millis();
+
+    // Line 1: IP Address
+    lcd.setCursor(0, 0);
+    if (WiFi.status() == WL_CONNECTED) {
+        lcd.print(WiFi.localIP());
+        lcd.print(" ");  // clear leftover chars
+    } else {
+        lcd.print("No WiFi        ");
+    }
+
+    // Line 2: Arm / Mode
+    lcd.setCursor(0, 1);
+
+    if (!liveArmed) {
+        lcd.print("DISARMED       ");
+    } else {
+        lcd.print("ARM ");
+
+        if (liveAutoMode) {
+            lcd.print("AUTO     ");
+        } else {
+            lcd.print("MANUAL   ");
+        }
     }
 }
 
@@ -262,10 +297,6 @@ void setup() {
     digitalWrite(REN1, HIGH);
     digitalWrite(LEN2, HIGH);
     digitalWrite(REN2, HIGH);
-
-    analogReadResolution(12);
-    stopMotors();
-    updateBatteryReadings();
 
     Serial.println("System ready");
     Serial.println("===== PIN SETUP =====");
@@ -446,6 +477,7 @@ void setup() {
 
 void loop() {
     server.handleClient();
+    updateLCD();
 
     // Do not block robot control if WiFi disconnects
     if (WiFi.status() != WL_CONNECTED) {
