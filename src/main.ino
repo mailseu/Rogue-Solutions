@@ -2,7 +2,6 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <Wire.h>
-#include <LiquidCrystal_I2C.h>
 #include "DFRobot_HuskylensV2.h"
 
 // Motor 1 pins
@@ -44,9 +43,6 @@ volatile int liveTagX = 0;
 volatile int liveTagY = 0;
 
 unsigned long lastTagSeenTime = 0;
-
-// LCD Display
-LiquidCrystal_I2C lcd(0x27, 16, 2);
 
 // Phone hotspot settings
 const char* ssid = "hms";
@@ -243,18 +239,6 @@ void setup() {
     Serial.begin(115200);
 
     Wire.begin(HUSKY_SDA, HUSKY_SCL);
-
-    analogReadResolution(12);
-    pinMode(BATTERY_PIN, INPUT);
-    stopMotors();
-
-    lcd.init();
-    lcd.backlight();
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("9 LIVES Rover");
-    lcd.setCursor(0, 1);
-    lcd.print("Starting...");
 
     Serial.println("Starting HuskyLens...");
 
